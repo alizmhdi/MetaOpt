@@ -1,14 +1,251 @@
 namespace MetaOptimize.Cli
 {
     using System;
+    using System.Collections.Generic;
     using System.Diagnostics;
     using System.IO;
+    using System.Linq;
+    using System.Text;
+    using Newtonsoft.Json.Linq;
     /// <summary>
     /// Implements a utility function with some .
     /// </summary>
     /// TODO: incomplete comment
     public static class CliUtils
     {
+        /// <summary>
+        /// Reads a demand matrix from a pickle file and converts it to pair demands.
+        /// Expected pickle contents:
+        /// 1) A 2D matrix-like object (list, numpy array, DataFrame values), optionally with a node order.
+        /// 2) A dictionary keyed by (src, dst) tuples.
+        /// </summary>
+        /// <param name="pickleFilePath">Path to pickle file.</param>
+        /// <param name="topology">Target topology.</param>
+        /// <param name="pythonExecutable">Python executable to run unpickling helper.</param>
+        /// <returns>Demand map over all node pairs in topology.</returns>
+        public static Dictionary<(string, string), double> LoadDemandMatrixFromPickle(
+            string pickleFilePath,
+            Topology topology,
+            string pythonExecutable = "python3")
+        {
+            if (!File.Exists(pickleFilePath))
+            {
+                throw new FileNotFoundException("Pickle file was not found", pickleFilePath);
+            }
+
+            var pythonScript = @"
+import json
+import pickle
+import sys
+
+def _to_float(v):
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+def _emit_matrix(matrix, node_order=None):
+    print(json.dumps({
+        'kind': 'matrix',
+        'matrix': matrix,
+        'node_order': node_order,
+    }))
+
+def _emit_pairs(d):
+    pairs = {}
+    for k, v in d.items():
+        if isinstance(k, tuple) and len(k) == 2:
+            fv = _to_float(v)
+            if fv is not None:
+                pairs[f'{k[0]}::{k[1]}'] = fv
+    print(json.dumps({
+        'kind': 'pair_map',
+        'pair_demands': pairs,
+    }))
+
+with open(sys.argv[1], 'rb') as f:
+    obj = pickle.load(f)
+
+if isinstance(obj, dict):
+    if len(obj) > 0 and all(isinstance(k, tuple) and len(k) == 2 for k in obj.keys()):
+        _emit_pairs(obj)
+        sys.exit(0)
+
+    if 'pair_demands' in obj and isinstance(obj['pair_demands'], dict):
+        _emit_pairs(obj['pair_demands'])
+        sys.exit(0)
+
+    candidate_matrix = None
+    candidate_nodes = None
+    for key in ['matrix', 'demand_matrix', 'tm', 'traffic_matrix']:
+        if key in obj:
+            candidate_matrix = obj[key]
+            break
+    for key in ['nodes', 'node_order', 'node_names', 'labels']:
+        if key in obj:
+            candidate_nodes = [str(x) for x in obj[key]]
+            break
+
+    if candidate_matrix is not None:
+        if hasattr(candidate_matrix, 'tolist'):
+            candidate_matrix = candidate_matrix.tolist()
+        _emit_matrix(candidate_matrix, candidate_nodes)
+        sys.exit(0)
+
+if hasattr(obj, 'to_numpy') and hasattr(obj, 'index'):
+    matrix = obj.to_numpy().tolist()
+    node_order = [str(x) for x in obj.index]
+    _emit_matrix(matrix, node_order)
+    sys.exit(0)
+
+if hasattr(obj, 'tolist'):
+    obj = obj.tolist()
+
+if isinstance(obj, list):
+    _emit_matrix(obj, None)
+    sys.exit(0)
+
+raise RuntimeError('Unsupported pickle payload. Expected 2D matrix-like object, DataFrame, or dict keyed by (src, dst).')
+";
+
+            var processInfo = new ProcessStartInfo
+            {
+                FileName = pythonExecutable,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            processInfo.ArgumentList.Add("-");
+            processInfo.ArgumentList.Add(pickleFilePath);
+
+            using var process = Process.Start(processInfo);
+            if (process == null)
+            {
+                throw new Exception("Failed to start python process to parse pickle file.");
+            }
+
+            process.StandardInput.Write(pythonScript);
+            process.StandardInput.Close();
+
+            var output = process.StandardOutput.ReadToEnd();
+            var error = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+
+            if (process.ExitCode != 0)
+            {
+                throw new Exception($"Failed to parse pickle demand file. Python error: {error}");
+            }
+
+            if (string.IsNullOrWhiteSpace(output))
+            {
+                throw new Exception("Python pickle parser returned empty output.");
+            }
+
+            var parsed = JObject.Parse(output);
+            var demands = topology.GetNodePairs().ToDictionary(pair => pair, _ => 0.0);
+
+            var kind = parsed["kind"]?.ToString();
+            if (kind == "pair_map")
+            {
+                var pairDemands = parsed["pair_demands"] as JObject
+                    ?? throw new Exception("pair_map output missing pair_demands object.");
+                foreach (var prop in pairDemands.Properties())
+                {
+                    var parts = prop.Name.Split("::");
+                    if (parts.Length != 2)
+                    {
+                        continue;
+                    }
+
+                    var pair = (parts[0], parts[1]);
+                    if (!demands.ContainsKey(pair))
+                    {
+                        continue;
+                    }
+
+                    var value = prop.Value.Value<double>();
+                    if (double.IsNaN(value) || double.IsInfinity(value) || value < 0)
+                    {
+                        throw new Exception($"Invalid demand value {value} for pair ({pair.Item1}, {pair.Item2}).");
+                    }
+
+                    demands[pair] = value;
+                }
+
+                return demands;
+            }
+
+            if (kind != "matrix")
+            {
+                throw new Exception("Unsupported parsed pickle output kind.");
+            }
+
+            var matrix = parsed["matrix"] as JArray
+                ?? throw new Exception("Matrix output missing matrix field.");
+            var numRows = matrix.Count;
+            if (numRows == 0)
+            {
+                return demands;
+            }
+
+            var nodeOrderToken = parsed["node_order"];
+            List<string> nodeOrder;
+            if (nodeOrderToken is JArray nodeOrderArray && nodeOrderArray.Count > 0)
+            {
+                nodeOrder = nodeOrderArray.Select(x => x?.ToString() ?? string.Empty).ToList();
+            }
+            else
+            {
+                nodeOrder = topology.GetAllNodes().ToList();
+            }
+
+            if (nodeOrder.Count != numRows)
+            {
+                throw new Exception($"Matrix row count ({numRows}) does not match node count ({nodeOrder.Count}).");
+            }
+
+            foreach (var row in matrix)
+            {
+                if (row is not JArray rowArray || rowArray.Count != nodeOrder.Count)
+                {
+                    throw new Exception("Demand matrix must be square and match topology node count.");
+                }
+            }
+
+            var topologyNodes = new HashSet<string>(topology.GetAllNodes());
+            var parsedNodes = new HashSet<string>(nodeOrder);
+            if (!topologyNodes.SetEquals(parsedNodes))
+            {
+                throw new Exception("Node order in pickle does not match topology nodes.");
+            }
+
+            for (int i = 0; i < nodeOrder.Count; i++)
+            {
+                var src = nodeOrder[i];
+                var row = (JArray)matrix[i];
+                for (int j = 0; j < nodeOrder.Count; j++)
+                {
+                    if (i == j)
+                    {
+                        continue;
+                    }
+
+                    var dst = nodeOrder[j];
+                    var demandValue = row[j]?.Value<double>() ?? 0.0;
+                    if (double.IsNaN(demandValue) || double.IsInfinity(demandValue) || demandValue < 0)
+                    {
+                        throw new Exception($"Invalid demand value {demandValue} for pair ({src}, {dst}).");
+                    }
+
+                    demands[(src, dst)] = demandValue;
+                }
+            }
+
+            return demands;
+        }
+
         /// <summary>
         /// Returns the heuristic encoder, partition and partitionlist
         /// based on inputs.
@@ -219,6 +456,13 @@ namespace MetaOptimize.Cli
         public static (Topology, List<Topology>) getTopology(string topologyFile, string pathFile, double downScaleFactor, bool enableClustering,
                 int numClusters, string clusterDir, bool verbose)
         {
+            if (string.IsNullOrWhiteSpace(pathFile))
+            {
+                var topologyName = Path.GetFileNameWithoutExtension(topologyFile);
+                pathFile = Path.Combine("..", "Topologies", "outputs", "paths", topologyName + "_paths.json");
+                Utils.logger("No path file was provided. Computed paths will be cached in " + pathFile, verbose);
+            }
+
             Topology topology = Parser.ReadTopologyJson(topologyFile, pathFile, scaleFactor: downScaleFactor);
             List<Topology> clusters = new List<Topology>();
             if (enableClustering)

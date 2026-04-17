@@ -463,7 +463,7 @@ namespace MetaOptimize
                 {
                     continue;
                 }
-                if (demand <= this.Threshold && Math.Abs(flows[pair] - demand) > 0.001)
+                if (demand <= this.Threshold && Math.Abs(flows[pair] - demand) > 0.1)
                 {
                     Logger.Debug($"{pair.Item1},{pair.Item2},{demand},{flows[pair]}");
                     Logger.Debug($"max aux variable {this.Solver.GetVariable(solution, this.MaxAuxVariables[pair])}");

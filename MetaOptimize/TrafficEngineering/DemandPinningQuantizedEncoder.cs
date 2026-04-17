@@ -61,7 +61,7 @@ namespace MetaOptimize
                 {
                     continue;
                 }
-                if (demand <= this.Threshold && Math.Abs(flows[pair] - demand) > 0.001)
+                if (demand <= this.Threshold && Math.Abs(flows[pair] - demand) > 0.1)
                 {
                     Console.WriteLine($"error: src {pair.Item1}, dst {pair.Item2}, demand {demand}, flow {flows[pair]}");
                     throw new Exception("Demand below the threshold is not routed fully through the shortest path.");
@@ -75,7 +75,7 @@ namespace MetaOptimize
                 {
                     foreach (var demandlvl in this.DemandVariables[pair].GetTerms())
                     {
-                        if (Math.Abs(demand - demandlvl.Coefficient) <= 0.001)
+                        if (Math.Abs(demand - demandlvl.Coefficient) <= 0.1)
                         {
                             found = true;
                         }

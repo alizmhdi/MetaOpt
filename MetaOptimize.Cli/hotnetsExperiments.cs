@@ -32,11 +32,11 @@ namespace MetaOptimize
             Heuristic heuristicName = Heuristic.DemandPinning;
             string logDir = @"../logs/demand_pinning_sweep_thresh/" + Utils.GetFID() + @"\";
             double timeToTerminate = 1800;
-            int numPaths = 2;
+            int numPaths = 4;
             double start = 5;
             double step = 2.5;
-            double end = 6;
-            int numProcessors = 16;
+            double end = 5;
+            int numProcessors = 32;
 
             ISolver<GRBVar, GRBModel> solver = (ISolver<GRBVar, GRBModel>)new GurobiSOS(verbose: 1, timeToTerminateNoImprovement: timeToTerminate);
 

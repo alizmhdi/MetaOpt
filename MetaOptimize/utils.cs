@@ -6,6 +6,7 @@ namespace MetaOptimize
     using System.IO;
     using System.Linq;
     using Newtonsoft.Json;
+    using Newtonsoft.Json.Linq;
     /// <summary>
     /// Implements a utility function with some .
     /// </summary>
@@ -235,10 +236,6 @@ namespace MetaOptimize
         /// </summary>
         public static void writePathsToFile(string pathToWrite, Dictionary<int, Dictionary<(string, string), string[][]>> output)
         {
-            if (File.Exists(pathToWrite))
-            {
-                throw new Exception("path to file to store the paths exist!!");
-            }
             var dirname = Path.GetDirectoryName(pathToWrite);
             if (!Directory.Exists(dirname))
             {

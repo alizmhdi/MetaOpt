@@ -6,6 +6,8 @@ namespace MetaOptimize.Cli
 {
     using System;
     using System.Diagnostics;
+    using System.Globalization;
+    using System.IO;
     using CommandLine;
     using Gurobi;
     using MetaOptimize;
@@ -33,13 +35,13 @@ namespace MetaOptimize.Cli
             topology.AddEdge("c", "d", capacity: 10);
 
             var partition = topology.RandomPartition(2);
-            // create the optimal encoder.
             var solverG = new GurobiSOS();
             var optimalEncoderG = new TEMaxFlowOptimalEncoder<GRBVar, GRBModel>(solverG, maxNumPaths: 1);
             var popEncoderG = new PopEncoder<GRBVar, GRBModel>(solverG, maxNumPaths: 1, numPartitions: 2, demandPartitions: partition);
             var adversarialInputGenerator = new TEAdversarialInputGenerator<GRBVar, GRBModel>(topology, maxNumPaths: 1);
 
             var (optimalSolutionG, popSolutionG) = adversarialInputGenerator.MaximizeOptimalityGap(optimalEncoderG, popEncoderG);
+
             Console.WriteLine("Optimal:");
             Console.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(optimalSolutionG, Newtonsoft.Json.Formatting.Indented));
             Console.WriteLine("****");
@@ -190,61 +192,268 @@ namespace MetaOptimize.Cli
         /// TODO: specify how this function is different from the previous.
         public static void Main(string[] args)
         {
-            var binSize = new List<double>();
-            binSize.Add(1.00001);
-            binSize.Add(1.00001);
-            var bins = new Bins(6, binSize);
-            var numDemands = 9;
-            var numDimensions = 2;
-            var optimalBins = 3;
-            var ffdMethod = FFDMethodChoice.FFDSum;
-            List<IList<double>> demandList = null;
-            double perIterationTimeout = 1000;
-            // double perIterationTimeout = double.PositiveInfinity;
-            var solverG = new GurobiSOS(timeout: perIterationTimeout, verbose: 1);
-            var optimalEncoder = new VBPOptimalEncoder<GRBVar, GRBModel>(solverG, numDemands, numDimensions, BreakSymmetry: false);
-            var ffdEncoder = new FFDItemCentricEncoder<GRBVar, GRBModel>(solverG, numDemands, numDimensions);
-            var adversarialGenerator = new VBPAdversarialInputGenerator<GRBVar, GRBModel>(bins, numDemands, numDimensions);
-            var (optimalSolutionG, ffdSolutionG) = adversarialGenerator.MaximizeOptimalityGapFFD(optimalEncoder, ffdEncoder,
-                                                            optimalBins, ffdMethod: ffdMethod, itemList: demandList, verbose: true);
-            Console.WriteLine("Optimal:");
-            Console.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(optimalSolutionG, Newtonsoft.Json.Formatting.Indented));
-            Console.WriteLine("****");
-            Console.WriteLine("Heuristic:");
-            Console.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(ffdSolutionG, Newtonsoft.Json.Formatting.Indented));
-            Console.WriteLine("****");
-            Console.WriteLine("Optimal number of bins: " + optimalSolutionG.TotalNumBinsUsed);
-            Console.WriteLine("FFD number of bins: " + ffdSolutionG.TotalNumBinsUsed);
+            if (args != null && args.Length > 0 && args[0].Equals("solve-pkl-b4", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Length < 2)
+                {
+                    throw new ArgumentException("Usage: solve-pkl-b4 <demand_matrix.pkl> [pinningThreshold] [pythonExecutable] [topologyJson]");
+                }
+
+                var picklePath = args[1];
+                var threshold = args.Length >= 3
+                    ? double.Parse(args[2], CultureInfo.InvariantCulture)
+                    : 250.0;
+                var pythonExecutable = args.Length >= 4 ? args[3] : "python3";
+                var topologyPath = args.Length >= 5 ? args[4] : @"../Topologies/b4-teavar.json";
+                var pathFile = @"../Topologies/outputs/paths/b4-teavar_paths.json";
+
+                SolveB4DemandPinningAndOptimalFromPickle(picklePath, threshold, pythonExecutable, topologyPath, pathFile);
+                return;
+            }
+
+            impactOfDPThresholdOnGap();
         }
 
+        /// <summary>
+        /// Loads a pickle demand matrix and computes demand pinning and optimal objective on B4 with 4 paths.
+        /// </summary>
+        /// <param name="picklePath">Path to demand matrix pickle.</param>
+        /// <param name="demandPinningThreshold">Demand pinning threshold.</param>
+        /// <param name="pythonExecutable">Python executable for pickle parsing.</param>
+        /// <param name="topologyPath">Topology json path (defaults to B4).</param>
+        /// <param name="pathFile">Path file json path (defaults to B4).</param>
+        public static void SolveB4DemandPinningAndOptimalFromPickle(
+            string picklePath,
+            double demandPinningThreshold = 250.0,
+            string pythonExecutable = "python3",
+            string topologyPath = @"../Topologies/b4-teavar.json",
+            string pathFile = @"../Topologies/outputs/paths/b4-teavar_paths.json")
+        {
+            const int numPaths = 4;
+            string clusterDir = null;
+            var (topology, clusters) = CliUtils.getTopology(topologyPath, pathFile, 1, false,
+                                                    1, clusterDir, false);
+            var demands = CliUtils.LoadDemandMatrixFromPickle(picklePath, topology, pythonExecutable);
+
+            var solver = new GurobiSOS(verbose: 1);
+            var (optimalDemandMet, demandPinningDemandMet) = CliUtils.getOptimalDemandPinningTotalDemand<GRBVar, GRBModel>(
+                solver,
+                demands,
+                topology,
+                numPaths,
+                demandPinningThreshold);
+
+            Console.WriteLine("============================================");
+            Console.WriteLine("B4 fixed-demand evaluation (k=4)");
+            Console.WriteLine($"Demand pickle: {picklePath}");
+            Console.WriteLine($"Pinning threshold: {demandPinningThreshold}");
+            Console.WriteLine($"Optimal demand met: {optimalDemandMet}");
+            Console.WriteLine($"Demand pinning demand met: {demandPinningDemandMet}");
+            Console.WriteLine($"Gap (optimal - pinning): {optimalDemandMet / demandPinningDemandMet}");
+            Console.WriteLine("============================================");
+        }
+
+        /// <summary>
+        /// test case for TE with realistic constraints.
+        /// </summary>
+        public static void impactOfDPThresholdOnGap()
+        {
+            var topologies = new Dictionary<string, string>();
+            topologies["B4"] = @"../Topologies/b4-teavar.json";
+            // topologies["SWAN"] = @"../Topologies/swan.json";
+            // topologies["Abilene"] = @"../Topologies/abilene.json";
+            Heuristic heuristicName = Heuristic.DemandPinning;
+            string logDir = @"../logs/demand_pinning_sweep_thresh/" + Utils.GetFID() + @"\";
+            double timeToTerminate = 5000;
+            int numPaths = 4;
+            double start = 5;
+            double step = 2.5;
+            double end = 5;
+            int numProcessors = 32;
+
+            ISolver<GRBVar, GRBModel> solver = (ISolver<GRBVar, GRBModel>)new GurobiSOS(verbose: 1, timeToTerminateNoImprovement: timeToTerminate);
+
+            // goes through topologies one by one and sweeps through the threshold.
+            foreach (var (topoName, topoPath) in topologies)
+            {
+                var topology = Parser.ReadTopologyJson(topoPath);
+                var maxThreshold = topology.MinCapacity();
+                string logFile = topoName + @"_" + heuristicName + ".txt";
+                // Utils.CreateFile(logDir, logFile, removeIfExist: true);
+                // Utils.AppendToFile(logDir, logFile, maxThreshold.ToString());
+                for (double i = start; i <= end; i += step) {
+                    var threshold = i * maxThreshold / 100;
+                    var (optimal, heuristic, demands) = CliUtils.maximizeOptimalityGapDemandPinning<GRBVar, GRBModel>(
+                            solver: solver, topology: topology, numPaths: numPaths, threshold: threshold, numProcessors: numProcessors);
+                    var gap = optimal - heuristic;
+                    // Utils.AppendToFile(logDir, logFile, i + ", " + threshold + ", " + optimal + ", " + heuristic + ", " + gap);
+                    Console.WriteLine("==== Gap --> " + " i=" + i + " threshold=" + threshold + " optimal=" + optimal + " heuristic=" + heuristic + " gap=" + gap);
+                }
+            }
+        }
+        /// <summary>
+        ///     test MetaOpt on TE with realistic constraints.
+        /// </summary>
+        public static void MainTE(string[] args)
+        {
+            // topo parameters
+            string topoName = "b4";
+            bool metaOptRndInit = false;
+            string topoPath = "";
+            string clusterDir = null;
+            string pathFile = null;
+            int numClusters = 1;
+            double downScaleFactor = 1;
+            bool enableClustering = false;
+            int clusterVersion = -1;
+            double perClusterTimeout = 0;
+            if (topoName == "Cogentco")
+            {
+                topoPath = @"../Topologies/Cogentco.json";
+                clusterDir = @"../Topologies/partition_log/Cogentco_10_fm_partitioning/";
+                pathFile = @"../Topologies/outputs/paths/Cogentco_sp.json";
+                numClusters = 10;
+                downScaleFactor = 0.001;
+                enableClustering = true;
+                clusterVersion = 2;
+                perClusterTimeout = 1200;
+            }
+            else if (topoName == "b4")
+            {
+                topoPath = @"../Topologies/b4-teavar.json";
+                pathFile = @"../Topologies/outputs/paths/b4-teavar_paths.json";
+                perClusterTimeout = 5000;
+            }
+            else if (topoName == "Uninett2010")
+            {
+                topoPath = @"../Topologies/Uninett2010.json";
+                clusterDir = @"../Topologies/partition_log/Uninett2010_8_fm_partitioning/";
+                pathFile = @"../Topologies/outputs/paths/Uninett2010_sp.json";
+                numClusters = 8;
+                downScaleFactor = 0.001;
+                enableClustering = true;
+                clusterVersion = 2;
+                perClusterTimeout = 1200;
+                // perClusterTimeout = 27691;
+            }
+            else
+            {
+                throw new Exception("no valid topo name");
+            }
+            var (topology, clusters) = CliUtils.getTopology(topoPath, pathFile, downScaleFactor, enableClustering,
+                                                    numClusters, clusterDir, false);
+            var avgLinkCap = Math.Round(topology.AverageCapacity(), 4);
+            int numPaths = 4;
+            // solver parameters
+            int numThreads = MachineStat.numThreads;
+            int numProcessors = MachineStat.numProcessors;
+            // hueristic parameters
+            var heuristicName = Heuristic.DemandPinning;
+            var innerEncoding = InnerRewriteMethodChoice.PrimalDual;
+            // dp variables
+            var demandUBRatio = 0.5;
+            var demandPinningRatio = 0.05;
+            // pop variables
+            int numSlices = 2;
+            int numSamples = 5;
+            var partition = topology.RandomPartition(numSlices);
+            var partitionsList = new List<IDictionary<(string, string), int>>();
+            for (int i = 0; i < numSamples; i++)
+            {
+                partitionsList.Add(topology.RandomPartition(numSlices));
+            }
+            // realistic parameters
+            double density = 1.0;
+            List<int> maxLargeDistanceList = new List<int>() { -1 };
+            var maxSmallDistanceList = new List<int>() { -1 };
+            double largeDemandLB = 0.25 * avgLinkCap;
+            int verbose = 1;
+
+            // computing gap
+            var demandPinningThreshold = Math.Round(demandPinningRatio * avgLinkCap, 4);
+            var demandUB = demandUBRatio * avgLinkCap;
+            Console.WriteLine(
+                String.Format("======== avg link cap {0}, demand UB {1}, demandThresh {2}", avgLinkCap, demandUB, demandPinningThreshold));
+
+            var demandSet = new HashSet<double>();
+            demandSet.Add(0);
+            if (heuristicName == Heuristic.DemandPinning)
+            {
+                demandSet.Add(demandPinningThreshold);
+            }
+            demandSet.Add(demandUB);
+            var demandList = new GenericList(demandSet);
+            // Primal-Dual
+            string logDir = @"../logs/realistic_constraints/" + topoName + "_" + numClusters + "_" + heuristicName
+                    + "_" + demandUB + "_" + demandPinningThreshold + "_" + numPaths + "_";
+            logDir = logDir + Utils.GetFID() + @"/";
+            string gapFile = @"gap.txt";
+            Utils.CreateFile(logDir, gapFile, removeIfExist: false);
+
+            foreach (var maxLargeDistance in maxLargeDistanceList)
+            {
+                foreach (var maxSmallDistance in maxSmallDistanceList)
+                {
+                    Console.WriteLine(
+                        String.Format("=================== maxLargeDistance {0}, maxSmallDistance {1}, LargeDemandLB {2}", maxLargeDistance, maxSmallDistance, largeDemandLB));
+                    string dirname = "primal_dual_" + heuristicName + "_density_" + density + "_maxLargeDistance_"
+                            + maxLargeDistance + "_maxSmallDistance" + maxSmallDistance + "_LargeDemandLB_" + largeDemandLB + "/";
+                    string demandFile = dirname + @"demands.txt";
+                    string progressFile = dirname + @"progress.txt";
+                    ISolver<GRBVar, GRBModel> solver = (ISolver<GRBVar, GRBModel>)new GurobiSOS(perClusterTimeout, verbose, numThreads, recordProgress: true,
+                                                        logPath: Path.Combine(logDir, progressFile), focusBstBd: false);
+                    var (heuristicEncoder, _, _) = CliUtils.getHeuristic<GRBVar, GRBModel>(solver: solver, topology: topology,
+                                                    h: heuristicName, numPaths: numPaths, numSlices: numSlices, demandPinningThreshold: demandPinningThreshold,
+                                                    partition: partition, numSamples: numSamples, partitionsList: partitionsList, InnerEncoding: innerEncoding,
+                                                    scaleFactor: downScaleFactor);
+                    var optimalEncoder = new TEMaxFlowOptimalEncoder<GRBVar, GRBModel>(solver, numPaths);
+                    var adversarialInputGenerator = new TEAdversarialInputGenerator<GRBVar, GRBModel>(topology, numPaths, numProcessors);
+                    (TEOptimizationSolution, TEOptimizationSolution) result = CliUtils.getMetaOptResult(adversarialInputGenerator, optimalEncoder, heuristicEncoder,
+                            demandUB, innerEncoding, demandList, enableClustering, clusterVersion, clusters, -1, -1, -1, false, false, density, largeDemandLB,
+                            maxLargeDistance, maxSmallDistance, metaOptRndInit, null);
+                    double optimal = result.Item1.MaxObjective;
+                    double heuristic = result.Item2.MaxObjective;
+                    var gap = optimal - heuristic;
+                    Utils.writeDemandsToFile(Path.Combine(logDir, demandFile), result.Item1.Demands);
+                    Utils.AppendToFile(logDir, gapFile,
+                                    String.Format("{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13},{14}", topoName, heuristicName, numClusters, numPaths,
+                                                    perClusterTimeout, demandPinningRatio, numSlices, numSamples, demandUB, density, largeDemandLB,
+                                                    maxLargeDistance, maxSmallDistance, numThreads, gap));
+                    Console.WriteLine("==== PrimalDual --> " + " gap=" + gap + " optimal=" + optimal + " heuristic=" + heuristic);
+                }
+            }
+        }
         /// <summary>
         /// test case for SP-PIFO.
         /// </summary>
         public static void PIFOTestMain(string[] args)
         {
             int maxRank = 8;
-            int numPackets = 15;
-            int numQueues = 4;
-            int splitQueue = 2;
-            int splitRank = 5;
+            int numPackets = 18;
+            int numQueues = 2;
+            // int splitQueue = 2;
+            // int splitRank = 5;
             var solverG = new GurobiSOS(verbose: 0);
 
             var packetRankEqualityConstraint = new Dictionary<int, int>();
-            packetRankEqualityConstraint[0] = 7;
-            packetRankEqualityConstraint[1] = 2;
-            packetRankEqualityConstraint[2] = 1;
-            packetRankEqualityConstraint[3] = 0;
+            packetRankEqualityConstraint[0] = 0;
+            packetRankEqualityConstraint[1] = 0;
+            packetRankEqualityConstraint[2] = 8;
+            packetRankEqualityConstraint[3] = 7;
             packetRankEqualityConstraint[4] = 7;
             packetRankEqualityConstraint[5] = 7;
-            packetRankEqualityConstraint[6] = 2;
-            packetRankEqualityConstraint[7] = 1;
-            packetRankEqualityConstraint[8] = 0;
-            packetRankEqualityConstraint[9] = 2;
-            packetRankEqualityConstraint[10] = 1;
+            packetRankEqualityConstraint[6] = 7;
+            packetRankEqualityConstraint[7] = 7;
+            packetRankEqualityConstraint[8] = 7;
+            packetRankEqualityConstraint[9] = 7;
+            packetRankEqualityConstraint[10] = 7;
             packetRankEqualityConstraint[11] = 0;
-            packetRankEqualityConstraint[12] = 2;
-            packetRankEqualityConstraint[13] = 1;
+            packetRankEqualityConstraint[12] = 0;
+            packetRankEqualityConstraint[13] = 0;
             packetRankEqualityConstraint[14] = 0;
+            packetRankEqualityConstraint[15] = 0;
+            packetRankEqualityConstraint[16] = 0;
+            packetRankEqualityConstraint[17] = 0;
             solverG.CleanAll();
             var optimalEncoder = new PIFOAvgDelayOptimalEncoder<GRBVar, GRBModel>(solverG, numPackets, maxRank);
             var optimalEncoding = optimalEncoder.Encoding(rankEqualityConstraints: packetRankEqualityConstraint);
@@ -256,7 +465,7 @@ namespace MetaOptimize.Cli
             Console.WriteLine("===== OPT {0}", optimizationSolutionOptimal.Cost);
 
             solverG.CleanAll();
-            var heuristicEncoder = new ModifiedSPPIFOAvgDelayEncoder<GRBVar, GRBModel>(solverG, numPackets, splitQueue, numQueues, splitRank, maxRank);
+            var heuristicEncoder = new SPPIFOAvgDelayEncoder<GRBVar, GRBModel>(solverG, numPackets, numQueues, maxRank);
             var heuristicEncoding = heuristicEncoder.Encoding(rankEqualityConstraints: packetRankEqualityConstraint);
             var solverSolutionHeuristic = optimalEncoder.Solver.Maximize(heuristicEncoding.MaximizationObjective);
             var solutionHeuristic = (PIFOOptimizationSolution)heuristicEncoder.GetSolution(solverSolutionHeuristic);
@@ -272,27 +481,35 @@ namespace MetaOptimize.Cli
         public static void PIFOMain(string[] args)
         {
             int maxRank = 8;
-            int numPackets = 18;
+            int numPackets = 36;
             int numQueues = 4;
             // int splitQueue = 2;
             // int splitRank = 4;
-            int maxQueueSize = 12;
-            int windowSize = 12;
-            double burstParam = 0.1;
+            // int maxQueueSize = 12;
+            // int windowSize = 12;
+            // double burstParam = 0.1;
 
-            var solverG = new GurobiSOS(verbose: 1, timeout: 1000);
-            // var optimalEncoder = new PIFOAvgDelayOptimalEncoder<GRBVar, GRBModel>(solverG, numPackets, maxRank);
-            // var heuristicEncoder = new SPPIFOAvgDelayEncoder<GRBVar, GRBModel>(solverG, numPackets, numQueues, maxRank);
+            var targetGapThreshold = double.NaN;
+            if (args != null && args.Length >= 2 && args[0].Equals("--pifo-gap-threshold", StringComparison.OrdinalIgnoreCase))
+            {
+                targetGapThreshold = double.Parse(args[1], CultureInfo.InvariantCulture);
+            }
+
+            var pifoProgressBasePath = Path.Combine("..", "logs", "pifo", "progress.txt");
+
+            var solverG = new GurobiSOS(verbose: 1, timeout: 120, numThreads: 32, recordProgress: true, logPath: pifoProgressBasePath);
+            var optimalEncoder = new PIFOAvgDelayOptimalEncoder<GRBVar, GRBModel>(solverG, numPackets, maxRank);
+            var heuristicEncoder = new SPPIFOAvgDelayEncoder<GRBVar, GRBModel>(solverG, numPackets, numQueues, maxRank);
             // var optimalEncoder = new SPPIFOAvgDelayEncoder<GRBVar, GRBModel>(solverG, numPackets, numQueues, maxRank);
             // var heuristicEncoder = new ModifiedSPPIFOAvgDelayEncoder<GRBVar, GRBModel>(solverG, numPackets, splitQueue, numQueues,
             //     splitRank, maxRank);
             // var optimalEncoder = new PIFOWithDropAvgDelayEncoder<GRBVar, GRBModel>(solverG, numPackets, maxRank, maxQueueSize);
-            var H1 = new SPPIFOWithDropAvgDelayEncoder<GRBVar, GRBModel>(solverG, numPackets, numQueues, maxRank, maxQueueSize);
-            var H2 = new AIFOAvgDelayEncoder<GRBVar, GRBModel>(solverG, numPackets, maxRank, maxQueueSize, windowSize, burstParam);
+            // var H1 = new SPPIFOWithDropAvgDelayEncoder<GRBVar, GRBModel>(solverG, numPackets, numQueues, maxRank, maxQueueSize);
+            // var H2 = new AIFOAvgDelayEncoder<GRBVar, GRBModel>(solverG, numPackets, maxRank, maxQueueSize, windowSize, burstParam);
 
             var adversarialGenerator = new PIFOAdversarialInputGenerator<GRBVar, GRBModel>(numPackets, maxRank);
-            var (optimalSolutionG, heuristicSolutionG) = adversarialGenerator.MaximizeOptimalityGap(H1,
-                H2, verbose: true);
+            var (optimalSolutionG, heuristicSolutionG) = adversarialGenerator.MaximizeOptimalityGap(optimalEncoder,
+                heuristicEncoder, verbose: true);
             Console.WriteLine("Optimal:");
             Console.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(optimalSolutionG, Newtonsoft.Json.Formatting.Indented));
             Console.WriteLine("****");
@@ -301,6 +518,37 @@ namespace MetaOptimize.Cli
             Console.WriteLine("****");
             Console.WriteLine("Optimal cost: " + optimalSolutionG.Cost);
             Console.WriteLine("Heuristic cost: " + heuristicSolutionG.Cost);
+
+            if (!double.IsNaN(targetGapThreshold))
+            {
+                var progressPath = FindLatestProgressFilePath(pifoProgressBasePath);
+                if (progressPath == null)
+                {
+                    Console.WriteLine("Could not find progress log file for PIFO run.");
+                }
+                else
+                {
+                    if (TryGetFirstThresholdHit(progressPath, targetGapThreshold, out var firstHitTimeMs, out var firstHitGap))
+                    {
+                        Console.WriteLine(
+                            string.Format(
+                                CultureInfo.InvariantCulture,
+                                "First point reaching gap threshold {0}: time_ms={1}, gap={2}",
+                                targetGapThreshold,
+                                firstHitTimeMs,
+                                firstHitGap));
+                    }
+                    else
+                    {
+                        Console.WriteLine(
+                            string.Format(
+                                CultureInfo.InvariantCulture,
+                                "Gap threshold {0} was not reached in this run. Progress log: {1}",
+                                targetGapThreshold,
+                                progressPath));
+                    }
+                }
+            }
 
             var orderToRankOpt = new Dictionary<int, double>();
             var orderToRankHeu = new Dictionary<int, double>();
@@ -322,6 +570,71 @@ namespace MetaOptimize.Cli
             }
             Console.WriteLine("number of inversions in OPT: " + numInvOpt);
             Console.WriteLine("number of inversions in HEU: " + numInvHeu);
+        }
+
+        private static bool TryGetFirstThresholdHit(string progressPath, double threshold, out double timeMs, out double gap)
+        {
+            timeMs = -1;
+            gap = double.NaN;
+            foreach (var line in File.ReadLines(progressPath))
+            {
+                var parts = line.Split(",");
+                if (parts.Length < 2)
+                {
+                    continue;
+                }
+
+                if (!double.TryParse(parts[0].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var currTimeMs))
+                {
+                    continue;
+                }
+
+                if (!double.TryParse(parts[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var currGap))
+                {
+                    continue;
+                }
+
+                if (currGap >= threshold)
+                {
+                    timeMs = currTimeMs;
+                    gap = currGap;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string FindLatestProgressFilePath(string baseLogPath)
+        {
+            var dirname = Path.GetDirectoryName(baseLogPath);
+            var fileNameWithoutExt = Path.GetFileNameWithoutExtension(baseLogPath);
+            var extension = Path.GetExtension(baseLogPath);
+            if (string.IsNullOrEmpty(dirname) || !Directory.Exists(dirname))
+            {
+                return null;
+            }
+
+            var pattern = fileNameWithoutExt + "_*" + extension;
+            var files = Directory.GetFiles(dirname, pattern);
+            if (files == null || files.Length == 0)
+            {
+                return null;
+            }
+
+            string latestFile = null;
+            DateTime latestWriteTime = DateTime.MinValue;
+            foreach (var file in files)
+            {
+                var writeTime = File.GetLastWriteTimeUtc(file);
+                if (writeTime > latestWriteTime)
+                {
+                    latestWriteTime = writeTime;
+                    latestFile = file;
+                }
+            }
+
+            return latestFile;
         }
 
         private static int ComputeInversionNum(PIFOOptimizationSolution optimalSolutionG, Dictionary<int, double> orderToRankOpt, int pid)

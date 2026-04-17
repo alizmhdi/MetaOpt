@@ -280,7 +280,7 @@ namespace MetaOptimize.Cli
         /// <summary>
         /// store trajectory.
         /// </summary>
-        [Option('m', "storeprogress", Default = false, HelpText = "store the progress for the specified approach.")]
+        [Option('m', "storeprogress", Default = true, HelpText = "store the progress for the specified approach.")]
         public bool StoreProgress { get; set; }
 
         /// <summary>
