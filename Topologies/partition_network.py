@@ -11,9 +11,9 @@ from collections import defaultdict
 import os
 
 topo_name_list = [
-    # ("GtsCe", 1), 
-    ("Cogentco", 0),
-    # ("Uninett2010", 0)
+    # ("GtsCe", 1),
+    # ("Cogentco", 0),
+    ("Uninet2010", 0)
     # ("Kdl", 1),
     # ("b4-teavar", 0),
     # ("ring_200", 0),
@@ -21,27 +21,27 @@ topo_name_list = [
     # ("SWANTETopology", 0)
     ]
 num_partitions_list = [
-    2, 
+    # 2,
     # 3,
-    4,
+    # 4,
     # 5,
     # 6,
-    # 8, 
-    # 10, 
+    8,
+    # 10,
     # 12,
-    16,
-    # 15, 
-    # 20, 
-    # 20, 
+    # 16,
+    # 15,
+    # 20,
+    # 20,
     # 25,
     # 50,
     # 100,
 ]
 num_shortest_paths_list = [
-    2, 
-    4, 
-    10,
-    16,
+    # 2,
+    4,
+    # 10,
+    # 16,
 ]
 
 log_dir = "./partition_log/{}_{}_{}/"
@@ -87,7 +87,7 @@ for partitioning_method in partitioning_method_list:
                 subgraph_edges += len(subgraph_g.edges())
                 # print(subgraph_g.edges())
                 parse_and_convert_graphml.write_graph_json(subgraph_g, folder_path + f"/cluster_{pid}.json")
-            
+
                 for num_shortest_paths in num_shortest_paths_list:
                     for (node1, node2) in itertools.combinations(subgraph_g.nodes(), 2):
                         paths = k_shortest_paths(G, node1, node2, num_shortest_paths)

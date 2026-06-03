@@ -21,5 +21,9 @@ namespace MetaOptimize
         /// use division of first dimension by the second dimension to sort items (only for two dimension).
         /// </summary>
         FFDDiv,
+        /// <summary>
+        /// use the first dimension to sort items.
+        /// </summary>
+        FFD,
     }
 }

@@ -278,6 +278,16 @@ namespace MetaOptimize
                 case FFDMethodChoice.FF:
                     Utils.logger("Using FF Heuristic.", verbose);
                     break;
+                case FFDMethodChoice.FFD:
+                    Utils.logger("Using FFD Heuristic.", verbose);
+                    for (int itemID = 0; itemID < this.NumItems - 1; itemID++)
+                    {
+                        var poly = new Polynomial<TVar>();
+                        poly.Add(new Term<TVar>(1, this.DemandVariables[itemID + 1][0]));
+                        poly.Add(new Term<TVar>(-1, this.DemandVariables[itemID][0]));
+                        solver.AddLeqZeroConstraint(poly);
+                    }
+                    break;
                 case FFDMethodChoice.FFDSum:
                     Utils.logger("Using FFDSum Heuristic.", verbose);
                     for (int itemID = 0; itemID < this.NumItems - 1; itemID++)

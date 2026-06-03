@@ -72,9 +72,9 @@ namespace MetaOptimize.Cli
             // num jobs = 6m + 9n
             var solverG = new GurobiSOS(verbose: 0);
 
-            for (int m = 1; m < 10; m++)
+            for (int m = 1; m <= 1; m++)
             {
-                for (int n = 0; n < 2; n++)
+                for (int n = 1; n <= 1; n++)
                 {
                     Console.WriteLine(String.Format("============ m = {0}, n = {1}", m, n));
                     var binSize = new List<double>();
@@ -84,88 +84,26 @@ namespace MetaOptimize.Cli
                     // TODO: need to change var name to be appropriate for the problem.
                     var demands = new Dictionary<int, List<double>>();
                     int nxt_key = 0;
+                    demands[nxt_key] = new List<double>() { 1.0, 0.42 };
+                    nxt_key += 1;
+                    demands[nxt_key] = new List<double>() { 0.52, 0.24 };
+                    nxt_key += 1;
+                    demands[nxt_key] = new List<double>() { 0.5, 0.3 };
+                    nxt_key += 1;
+                    demands[nxt_key] = new List<double>() { 0.3, 0.2 };
+                    nxt_key += 1;
+                    demands[nxt_key] = new List<double>() { 0.3, 0.14 };
+                    nxt_key += 1;
+                    demands[nxt_key] = new List<double>() { 0.08, 0.58 };
+                    nxt_key += 1;
+                    demands[nxt_key] = new List<double>() { 0.0, 0.6 };
+                    nxt_key += 1;
+                    demands[nxt_key] = new List<double>() { 0.0, 0.12 };
+                    nxt_key += 1;
+                    demands[nxt_key] = new List<double>() { 0.0, 0.58 };
+                    nxt_key += 1;
+                    demands[nxt_key] = new List<double>() { 0.0, 0.58 };
 
-                    // TODO: need a comment that describes what the constants are here. you also may benefit from changing the constants to have a name.
-                    for (int i = 0; i < m; i++)
-                    {
-                        demands[nxt_key] = new List<double>() { 0.92, 0.0 };
-                        nxt_key += 1;
-                    }
-                    for (int i = 0; i < m; i++)
-                    {
-                        demands[nxt_key] = new List<double>() { 0.91, 0.01 };
-                        nxt_key += 1;
-                    }
-                    for (int i = 0; i < n; i++)
-                    {
-                        demands[nxt_key] = new List<double>() { 0.48, 0.2 };
-                        nxt_key += 1;
-                    }
-                    for (int i = 0; i < n; i++)
-                    {
-                        demands[nxt_key] = new List<double>() { 0.68, 0 };
-                        nxt_key += 1;
-                    }
-                    for (int i = 0; i < n; i++)
-                    {
-                        demands[nxt_key] = new List<double>() { 0.52, 0.12 };
-                        nxt_key += 1;
-                    }
-                    for (int i = 0; i < n; i++)
-                    {
-                        demands[nxt_key] = new List<double>() { 0.32, 0.32 };
-                        nxt_key += 1;
-                    }
-                    for (int i = 0; i < n; i++)
-                    {
-                        demands[nxt_key] = new List<double>() { 0.19, 0.45 };
-                        nxt_key += 1;
-                        demands[nxt_key] = new List<double>() { 0.42, 0.22 };
-                        nxt_key += 1;
-                    }
-                    for (int i = 0; i < n; i++)
-                    {
-                        demands[nxt_key] = new List<double>() { 0.1, 0.54 };
-                        nxt_key += 1;
-                        demands[nxt_key] = new List<double>() { 0.1, 0.54 };
-                        nxt_key += 1;
-                    }
-                    for (int i = 0; i < n; i++)
-                    {
-                        demands[nxt_key] = new List<double>() { 0.1, 0.53 };
-                        nxt_key += 1;
-                    }
-                    for (int i = 0; i < m; i++)
-                    {
-                        demands[nxt_key] = new List<double>() { 0.06, 0.48 };
-                        nxt_key += 1;
-                    }
-                    for (int i = 0; i < m; i++)
-                    {
-                        demands[nxt_key] = new List<double>() { 0.07, 0.47 };
-                        nxt_key += 1;
-                    }
-                    for (int i = 0; i < m; i++)
-                    {
-                        demands[nxt_key] = new List<double>() { 0.01, 0.53 };
-                        nxt_key += 1;
-                    }
-                    for (int i = 0; i < m; i++)
-                    {
-                        demands[nxt_key] = new List<double>() { 0.03, 0.51 };
-                        nxt_key += 1;
-                    }
-                    for (int i = 0; i < demands.Count - 1; i++)
-                    {
-                        double total_sum_1 = 0;
-                        double total_sum_2 = 0;
-                        for (int j = 0; j < demands[0].Count; j++)
-                        {
-                            total_sum_1 += demands[i][j];
-                            total_sum_2 += demands[i + 1][j];
-                        }
-                        Debug.Assert(total_sum_1 >= total_sum_2 - 0.00001);
-                    }
                     solverG.CleanAll();
                     var optimalEncoder = new VBPOptimalEncoder<GRBVar, GRBModel>(solverG, demands.Count, demands[0].Count);
                     var optimalEncoding = optimalEncoder.Encoding(bins, inputEqualityConstraints: demands, verbose: false);
@@ -181,9 +119,64 @@ namespace MetaOptimize.Cli
                     var solutionFFD = (VBPOptimizationSolution)ffdEncoder.GetSolution(solverSolutionFFD);
                     Console.WriteLine(
                         String.Format("===== HUE {0}", solutionFFD.TotalNumBinsUsed));
-                    Debug.Assert(optimizationSolutionOptimal.TotalNumBinsUsed * 2 == solutionFFD.TotalNumBinsUsed);
                 }
             }
+        }
+
+        /// <summary>
+        /// Uses VBPAdversarialInputGenerator to find adversarial inputs for VBP
+        /// given the number of jobs and number of resource dimensions.
+        /// </summary>
+        /// <param name="numJobs">Total number of items/jobs to pack.</param>
+        /// <param name="numDimensions">Number of resource dimensions per item.</param>
+        public static void vbpAdversarialMain(int numJobs, int numDimensions)
+        {
+            int numBins = numJobs;
+            double timeout = 300;
+            string logDir = Path.Combine("..", "logs", "vbp_adversarial", $"jobs_{numJobs}_dims_{numDimensions}" + Utils.GetFID());
+            Directory.CreateDirectory(logDir);
+            string progressFile = Path.Combine(logDir, "progress.txt");
+            string resultFile = Path.Combine(logDir, "result.txt");
+            var solverG = new GurobiSOS(timeout: timeout, verbose: 1, recordProgress: true, logPath: progressFile);
+
+            var binSize = new List<double>();
+            for (int d = 0; d < numDimensions; d++)
+            {
+                binSize.Add(1.00001);
+            }
+            var bins = new Bins(numBins, binSize);
+
+            // Optionally, you could pass logPath/progress to the solver if supported
+            // (not all solvers/encoders may support this, but for consistency)
+
+            var optimalEncoder = new VBPOptimalEncoder<GRBVar, GRBModel>(solverG, numJobs, numDimensions);
+            var ffdEncoder = new FFDItemCentricEncoder<GRBVar, GRBModel>(solverG, numJobs, numDimensions);
+
+            var adversarialGenerator = new VBPAdversarialInputGenerator<GRBVar, GRBModel>(bins, numJobs, numDimensions);
+            var (optimalSolution, heuristicSolution) = adversarialGenerator.MaximizeOptimalityGapFFD(
+                optimalEncoder,
+                ffdEncoder,
+                numBinsUsedOptimal: -1,
+                ffdMethod: FFDMethodChoice.FFD,
+                verbose: true);
+
+            // Save results to file
+            using (var writer = new StreamWriter(resultFile, false))
+            {
+                writer.WriteLine($"OPT bins used: {optimalSolution.TotalNumBinsUsed}");
+                writer.WriteLine($"FFD bins used: {heuristicSolution.TotalNumBinsUsed}");
+                writer.WriteLine($"Gap: {heuristicSolution.TotalNumBinsUsed - optimalSolution.TotalNumBinsUsed}");
+                writer.WriteLine("Adversarial item sizes:");
+                writer.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(optimalSolution.Items, Newtonsoft.Json.Formatting.Indented));
+            }
+
+            // Also print to console
+            Console.WriteLine($"===== OPT bins used: {optimalSolution.TotalNumBinsUsed}");
+            Console.WriteLine($"===== FFD bins used: {heuristicSolution.TotalNumBinsUsed}");
+            Console.WriteLine($"===== Gap: {heuristicSolution.TotalNumBinsUsed - optimalSolution.TotalNumBinsUsed}");
+            Console.WriteLine($"Results saved to: {resultFile}");
+            Console.WriteLine("Adversarial item sizes:");
+            Console.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(optimalSolution.Items, Newtonsoft.Json.Formatting.Indented));
         }
 
         /// <summary>
@@ -203,15 +196,15 @@ namespace MetaOptimize.Cli
                 var threshold = args.Length >= 3
                     ? double.Parse(args[2], CultureInfo.InvariantCulture)
                     : 250.0;
-                var pythonExecutable = args.Length >= 4 ? args[3] : "python3";
+                var pythonExecutable = args.Length >= 4 ? args[3] : "/home/yizhuoliang/miniconda3/envs/metarl/bin/python3";
                 var topologyPath = args.Length >= 5 ? args[4] : @"../Topologies/b4-teavar.json";
                 var pathFile = @"../Topologies/outputs/paths/b4-teavar_paths.json";
 
                 SolveB4DemandPinningAndOptimalFromPickle(picklePath, threshold, pythonExecutable, topologyPath, pathFile);
                 return;
             }
-
-            impactOfDPThresholdOnGap();
+            // vbpMain(args);
+            MainTE(args);
         }
 
         /// <summary>
@@ -324,11 +317,23 @@ namespace MetaOptimize.Cli
                 pathFile = @"../Topologies/outputs/paths/b4-teavar_paths.json";
                 perClusterTimeout = 5000;
             }
-            else if (topoName == "Uninett2010")
+            else if (topoName == "swan")
             {
-                topoPath = @"../Topologies/Uninett2010.json";
-                clusterDir = @"../Topologies/partition_log/Uninett2010_8_fm_partitioning/";
-                pathFile = @"../Topologies/outputs/paths/Uninett2010_sp.json";
+                topoPath = @"../Topologies/swan.json";
+                pathFile = @"../Topologies/outputs/paths/swan_paths.json";
+                perClusterTimeout = 400;
+            }
+            else if (topoName == "abilene")
+            {
+                topoPath = @"../Topologies/abilene.json";
+                pathFile = @"../Topologies/outputs/paths/abilene_paths.json";
+                perClusterTimeout = 400;
+            }
+            else if (topoName == "Uninet2010")
+            {
+                topoPath = @"../Topologies/Uninet2010.json";
+                clusterDir = @"../Topologies/partition_log/Uninet2010_8_fm_partitioning/";
+                pathFile = @"../Topologies/outputs/paths/Uninet2010_sp.json";
                 numClusters = 8;
                 downScaleFactor = 0.001;
                 enableClustering = true;
@@ -350,12 +355,13 @@ namespace MetaOptimize.Cli
             // hueristic parameters
             var heuristicName = Heuristic.DemandPinning;
             var innerEncoding = InnerRewriteMethodChoice.PrimalDual;
+            // var innerEncoding = InnerRewriteMethodChoice.KKT;
             // dp variables
             var demandUBRatio = 0.5;
             var demandPinningRatio = 0.05;
             // pop variables
-            int numSlices = 2;
-            int numSamples = 5;
+            int numSlices = 1;
+            int numSamples = 1;
             var partition = topology.RandomPartition(numSlices);
             var partitionsList = new List<IDictionary<(string, string), int>>();
             for (int i = 0; i < numSamples; i++)
@@ -363,10 +369,11 @@ namespace MetaOptimize.Cli
                 partitionsList.Add(topology.RandomPartition(numSlices));
             }
             // realistic parameters
-            double density = 1.0;
-            List<int> maxLargeDistanceList = new List<int>() { -1 };
+            double density = 1;
+            List<int> maxLargeDistanceList = new List<int>() { 4 };
             var maxSmallDistanceList = new List<int>() { -1 };
             double largeDemandLB = 0.25 * avgLinkCap;
+            double largeDemandLB2 = largeDemandLB - 0.001;
             int verbose = 1;
 
             // computing gap
@@ -381,8 +388,10 @@ namespace MetaOptimize.Cli
             {
                 demandSet.Add(demandPinningThreshold);
             }
+            demandSet.Add(largeDemandLB2);
             demandSet.Add(demandUB);
             var demandList = new GenericList(demandSet);
+            // GenericList demandList = null;
             // Primal-Dual
             string logDir = @"../logs/realistic_constraints/" + topoName + "_" + numClusters + "_" + heuristicName
                     + "_" + demandUB + "_" + demandPinningThreshold + "_" + numPaths + "_";

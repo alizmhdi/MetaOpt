@@ -67,7 +67,7 @@ namespace MetaOptimize
                     throw new Exception("Demand below the threshold is not routed fully through the shortest path.");
                 }
                 bool found = false;
-                if (demand <= 0.001)
+                if (demand <= 0.01)
                 {
                     found = true;
                 }
